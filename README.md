@@ -1,1 +1,1 @@
-# Image-Latex-Interpreter-based-on-LLM
+# LaTeX-OCR-Model-SFT
