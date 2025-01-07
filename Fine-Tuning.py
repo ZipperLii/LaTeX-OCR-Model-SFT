@@ -1,5 +1,5 @@
 import torch
-from transformers import VisionEncoderDecoderModel
+from transformers import NougatProcessor, VisionEncoderDecoderModel
 from data import Im2Latex
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import TrainingArguments, Trainer
@@ -10,28 +10,20 @@ def try_gpu(i=0):
         return torch.device(f'cuda:{i}')
     return torch.device('cpu')
 
+processor = NougatProcessor.from_pretrained("facebook/nougat-base")
 model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
 
 batch_size = 32
 
 root = "./data"
-train_data = Im2Latex(root, 'im2latex_train.csv')
-validate_data = Im2Latex(root, 'im2latex_validate.csv')
-test_data = Im2Latex(root, 'im2latex_test.csv')
+train_data = Im2Latex(root, 'im2latex_train.csv', processor)
+validate_data = Im2Latex(root, 'im2latex_validate.csv', processor)
+test_data = Im2Latex(root, 'im2latex_test.csv', processor)
 
-lora_config = LoraConfig(
-    r=16,
-    target_modules=["q_proj", "v_proj"],
-    task_type=TaskType.CAUSAL_LM,
-    lora_alpha=32,
-    lora_dropout=0.05
-)
-
-lora_model = get_peft_model(model, lora_config)
-lora_model.print_trainable_parameters()
 
 
 num_epoch = 10
+
 training_args = TrainingArguments(
     output_dir="./checkpoints/mt0-large-lora",
     learning_rate=1e-3,
@@ -43,6 +35,17 @@ training_args = TrainingArguments(
     save_strategy="epoch",
     load_best_model_at_end=True,
 )
+
+lora_config = LoraConfig(
+    r=16,
+    target_modules=["q_proj", "v_proj"],
+    task_type=TaskType.CAUSAL_LM,
+    lora_alpha=32,
+    lora_dropout=0.05
+)
+
+lora_model = get_peft_model(model, lora_config)
+lora_model.print_trainable_parameters()
 
 trainer = Trainer(
     model=model,
