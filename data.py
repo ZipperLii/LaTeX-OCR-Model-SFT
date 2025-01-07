@@ -1,24 +1,45 @@
+import torch
 import os
+import pandas as pd
+from torch.utils.data import Dataset
 from PIL import Image
-from functools import partial
-from datasets import load_dataset
 
-# train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=8)
-# eval_dataloader = DataLoader(small_eval_dataset, batch_size=8)
-def data_preprocess(example, processor, image_dir):
-    image_paths = [os.path.join(image_dir, image) for image in example['image']]
-    images = [Image.open(image_path).convert('RGB') for image_path in image_paths]
-    formulas = example['formula']
-    inputs = processor(images=images, text=formulas, return_tensors="pt", padding="max_length", truncation=True)
-    return inputs
 
-def dataset_process(dataset, processor, image_dir):
-    preprocess_with_args = partial(data_preprocess, processor=processor, image_dir=image_dir)
-    train_dataset = dataset['train'].map(preprocess_with_args, batched=True)
-    test_dataset = dataset['test'].map(preprocess_with_args, batched=True)
-    validation_dataset = dataset['validation'].map(preprocess_with_args, batched=True)
+class Im2Latex(Dataset):
+    def __init__(self, root_dir, csv_file, trans=None):
+        self.root_dir = root_dir
+        self.csv_file = os.path.join(self.root_dir, csv_file)
+        self.trans = trans
+        self.data = pd.read_csv(self.csv_file)
+        
+    def __len__(self):
+        return len(self.data)
+        
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.root_dir, 'formula_images_processed', self.data.iloc[idx]['image'])
+        image = Image.open(img_path)
+        
+        if self.trans:
+            image = self.trans(image)
+            
+        return self.data.iloc[idx]['formula'], image
+
+
+# def data_preprocess(example, processor):
+#     formulas = example['formula']
+#     image = example['image']
+#     label_ids = processor.tokenizer(formulas, add_special_tokens=False, return_tensors="pt").input_ids
+#     inputs = processor(image, return_tensors="pt").pixel_values
+#     return (inputs, label_ids)
     
-    return train_dataset, test_dataset, validation_dataset
+#     # torch.utils.data.Dataset
+
+# def dataset_process(dataset, processor):
+#     preprocess_with_args = partial(data_preprocess, processor=processor)
+#     train_dataset = dataset['train'].map(preprocess_with_args, batched=False)
+#     test_dataset = dataset['test'].map(preprocess_with_args, batched=False)
+#     validation_dataset = dataset['validation'].map(preprocess_with_args, batched=False)
+#     return train_dataset, test_dataset, validation_dataset
 
 
 

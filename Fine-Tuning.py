@@ -1,50 +1,57 @@
 import torch
-from transformers import NougatProcessor, VisionEncoderDecoderModel
-from datasets import load_dataset, DatasetDict
-from data import dataset_process
-from eval import compute_metrics
+from transformers import VisionEncoderDecoderModel
+from data import Im2Latex
+from peft import LoraConfig, TaskType, get_peft_model
 from transformers import TrainingArguments, Trainer
-from datasets import load_dataset
-
+from eval import compute_metrics
 
 def try_gpu(i=0):
     if torch.cuda.device_count() >= i + 1:
         return torch.device(f'cuda:{i}')
     return torch.device('cpu')
 
-# train_file = "./data/im2latex_train.csv"
-# test_file = "./data/im2latex_test.csv"
-# validation_file = "./data/im2latex_validate.csv"
-# image_dir = './data/formula_images_processed'
-
-# dataset = DatasetDict({
-#     'train': load_dataset('csv', data_files=train_file, split='train'),
-#     'test': load_dataset('csv', data_files=test_file, split='train'),
-#     'validation': load_dataset('csv', data_files=validation_file, split='train')
-# })
-
-processor = NougatProcessor.from_pretrained("facebook/nougat-base")
-
 model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
 
-device = try_gpu()
-model.to(device)
+batch_size = 32
 
-dataset = load_dataset("yuntian-deng/im2latex-100k")
+root = "./data"
+train_data = Im2Latex(root, 'im2latex_train.csv')
+validate_data = Im2Latex(root, 'im2latex_validate.csv')
+test_data = Im2Latex(root, 'im2latex_test.csv')
 
-task_prompt = "<s_rvlcdip>"
+lora_config = LoraConfig(
+    r=16,
+    target_modules=["q_proj", "v_proj"],
+    task_type=TaskType.CAUSAL_LM,
+    lora_alpha=32,
+    lora_dropout=0.05
+)
 
-decoder_input_ids = processor.tokenizer(task_prompt, add_special_tokens=False, return_tensors="pt").input_ids
-image = dataset['train'][0]["image"]
-print(decoder_input_ids)
-pixel_values = processor(image, return_tensors="pt").pixel_values
-# training_args = TrainingArguments(output_dir="test_trainer")
+lora_model = get_peft_model(model, lora_config)
+lora_model.print_trainable_parameters()
 
-# trainer = Trainer(
-#     model=model,
-#     args=training_args,
-#     train_dataset=dataset['train'],
-#     eval_dataset=dataset['val'],
-#     compute_metrics=compute_metrics,
-# )
-# trainer.train()
+
+num_epoch = 10
+training_args = TrainingArguments(
+    output_dir="./checkpoints/mt0-large-lora",
+    learning_rate=1e-3,
+    per_device_train_batch_size=32,
+    per_device_eval_batch_size=32,
+    num_train_epochs=num_epoch,
+    weight_decay=0.01,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    load_best_model_at_end=True,
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_data,
+    eval_dataset=validate_data,
+)
+
+trainer.train()
+
+model.save_pretrained("output_dir")
+
