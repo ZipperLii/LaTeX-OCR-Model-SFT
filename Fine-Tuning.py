@@ -1,8 +1,8 @@
 import torch
-from transformers import NougatProcessor, VisionEncoderDecoderModel
+from transformers import NougatProcessor, VisionEncoderDecoderModel, VisionEncoderDecoderConfig
 from data import Im2Latex
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import TrainingArguments, Trainer
+from torch.utils.data import DataLoader
 from eval import compute_metrics
 
 def try_gpu(i=0):
@@ -10,51 +10,67 @@ def try_gpu(i=0):
         return torch.device(f'cuda:{i}')
     return torch.device('cpu')
 
-processor = NougatProcessor.from_pretrained("facebook/nougat-base")
-model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
-
-batch_size = 32
-
-root = "./data"
-train_data = Im2Latex(root, 'im2latex_train.csv', processor)
-validate_data = Im2Latex(root, 'im2latex_validate.csv', processor)
-test_data = Im2Latex(root, 'im2latex_test.csv', processor)
+def main():
+    device = try_gpu(i=0)
 
 
+    # load model and processor
+    config = VisionEncoderDecoderConfig.from_pretrained("facebook/nougat-base")
+    processor = NougatProcessor.from_pretrained("facebook/nougat-base")
+    # model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base")
+    model = VisionEncoderDecoderModel.from_pretrained("facebook/nougat-base", config=config)
+    model.config.decoder_start_token_id = processor.tokenizer.eos_token_id
+    model.config.pad_token_id = processor.tokenizer.pad_token_id
+    model.config.vocab_size = model.config.decoder.vocab_size
+    # model.to(device)
+    
+    root = "./data"
+    train_data = Im2Latex(root, 'im2latex_train.csv', processor)
+    validate_data = Im2Latex(root, 'im2latex_validate.csv', processor)
+    test_data = Im2Latex(root, 'im2latex_test.csv', processor)
+    
+    batch_size = 8
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=1)
+    validate_dataloader = DataLoader(validate_data, batch_size=batch_size, shuffle=False, num_workers=1)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=1)
 
-num_epoch = 10
+    aa = 0
+    model.to(device)
+    
+    for i, X in enumerate(train_dataloader):
+        imgs, labels, attn_masks = X
+        imgs, labels, attn_masks = imgs.to(device), labels.to(device), attn_masks.to(device)
+        
+        optputs = model(imgs, labels)
+        print(optputs.logits)
+        aa += 1
+        if aa == 4:
+            break
+    outputs = model(pixel_values=train_data[0]['image'], labels=train_data[0]['labels'])
 
-training_args = TrainingArguments(
-    output_dir="./checkpoints/mt0-large-lora",
-    learning_rate=1e-3,
-    per_device_train_batch_size=32,
-    per_device_eval_batch_size=32,
-    num_train_epochs=num_epoch,
-    weight_decay=0.01,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    load_best_model_at_end=True,
-)
 
-lora_config = LoraConfig(
-    r=16,
-    target_modules=["q_proj", "v_proj"],
-    task_type=TaskType.CAUSAL_LM,
-    lora_alpha=32,
-    lora_dropout=0.05
-)
+    # lora_config = LoraConfig(
+    #     r=16,
+    #     target_modules=["q_proj", "v_proj", "k_proj"],
+    #     task_type=TaskType.CAUSAL_LM,
+    #     lora_alpha=32,
+    #     lora_dropout=0.05
+    # )
 
-lora_model = get_peft_model(model, lora_config)
-lora_model.print_trainable_parameters()
+    # lora_model = get_peft_model(model, lora_config, "default")
 
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_data,
-    eval_dataset=validate_data,
-)
 
-trainer.train()
+    # lora_model.print_trainable_parameters()
 
-model.save_pretrained("output_dir")
+
+    # outputs = lora_model(pixel_values=pixel_values, labels=labels)
+
+    # loss = outputs.loss
+
+
+if __name__ == '__main__':
+    main()
+    
+
+
 
